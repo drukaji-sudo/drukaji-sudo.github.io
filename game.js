@@ -178,7 +178,7 @@
             await channel.track(makePresencePayload());
             syncPresencePlayers();
           } else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
-            statusEl.textContent = 'Mode local : Supabase ' + status;
+            statusEl.textContent = 'Supabase ' + status + ' : exécute supabase-realtime-policy.sql';
           } else if(err) {
             statusEl.textContent = 'Mode local : erreur Supabase';
           } else {

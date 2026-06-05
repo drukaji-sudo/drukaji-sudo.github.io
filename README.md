@@ -101,3 +101,12 @@ Sans le Project URL, le live/rooms ne peut pas se connecter.
 - Les joueurs sont détectés avec Supabase Presence.
 - Les positions, couleurs, styles et scores sont synchronisés avec Broadcast.
 - Le classement live affiche maintenant tous les joueurs détectés dans la même room.
+
+
+## Important si le jeu affiche `Supabase CLOSED`
+
+Va dans Supabase > SQL Editor et exécute le fichier :
+
+`supabase-realtime-policy.sql`
+
+Sans ces politiques, Supabase peut fermer le channel Realtime et les amis ne seront pas visibles dans la room.
