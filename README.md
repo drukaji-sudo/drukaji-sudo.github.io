@@ -66,3 +66,16 @@ Tu peux aussi laisser vide et entrer les infos directement dans le menu du jeu.
 - Le joueur commence maintenant sur une vraie plateforme.
 - Les premières plateformes sont rapprochées et atteignables.
 - La gravité et la force de saut ont été ajustées pour un gameplay plus proche d'un tower jumper.
+
+
+## Configuration Supabase ajoutée
+
+La clé publishable Supabase a été ajoutée dans `config.js`.
+
+Il reste à ajouter le Project URL Supabase :
+
+```js
+SUPABASE_URL: "https://TON-PROJET.supabase.co"
+```
+
+Sans le Project URL, le live/rooms ne peut pas se connecter.
