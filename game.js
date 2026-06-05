@@ -5,6 +5,7 @@
   const menu = document.getElementById('menu');
   const hud = document.getElementById('hud');
   const leaderboard = document.getElementById('leaderboard');
+  const playersPanel = document.getElementById('playersPanel');
   const statusEl = document.getElementById('status');
 
   const playerNameInput = document.getElementById('playerName');
@@ -19,6 +20,7 @@
   const roomHud = document.getElementById('roomHud');
   const onlineHud = document.getElementById('onlineHud');
   const leaderList = document.getElementById('leaderList');
+  const playersList = document.getElementById('playersList');
 
   const savedCfg = JSON.parse(localStorage.getItem('frostTowerConfig') || '{}');
   const defaultCfg = window.FROST_TOWER_CONFIG || {};
@@ -120,57 +122,150 @@
   }
 
   async function connectSupabase(){
-    const cfg = JSON.parse(localStorage.getItem('frostTowerConfig') || '{}');
-    const url = cfg.SUPABASE_URL || defaultCfg.SUPABASE_URL;
-    const anon = cfg.SUPABASE_ANON_KEY || defaultCfg.SUPABASE_ANON_KEY;
+    try {
+      const cfg = JSON.parse(localStorage.getItem('frostTowerConfig') || '{}');
+      const url = (cfg.SUPABASE_URL || defaultCfg.SUPABASE_URL || '').trim();
+      const anon = (cfg.SUPABASE_ANON_KEY || defaultCfg.SUPABASE_ANON_KEY || '').trim();
 
-    if(!url || !anon){
-      statusEl.textContent = 'Mode local : ajoute Supabase pour jouer live';
-      return;
-    }
+      if(!url || !anon){
+        statusEl.textContent = 'Mode local : Supabase non configuré';
+        return;
+      }
 
-    supa = window.supabase.createClient(url, anon, {
-      realtime: { params: { eventsPerSecond: 20 } }
-    });
+      if(!window.supabase || !window.supabase.createClient){
+        statusEl.textContent = 'Mode local : librairie Supabase non chargée';
+        return;
+      }
 
-    channel = supa.channel(`frost-tower-room-${room}`, {
-      config: { presence: { key: id } }
-    });
+      supa = window.supabase.createClient(url, anon, {
+        realtime: { params: { eventsPerSecond: 30 } }
+      });
 
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const presence = channel.presenceState();
-        onlineHud.textContent = Object.keys(presence).length;
-      })
-      .on('broadcast', { event: 'state' }, ({ payload }) => {
-        if(!payload || payload.id === id) return;
-        payload.lastSeen = performance.now();
-        others.set(payload.id, payload);
-      })
-      .subscribe(async (status, err) => {
-        if(status === 'SUBSCRIBED'){
-          statusEl.textContent = 'Connecté live avec Supabase';
-          await channel.track({ id, name: state.name, joinedAt: Date.now() });
-        } else if(err) {
-          statusEl.textContent = 'Erreur Supabase : ' + (err.message || 'connexion impossible');
-        } else {
-          statusEl.textContent = 'Supabase : ' + status;
+      channel = supa.channel(`frost-tower-room-${room}`, {
+        config: {
+          presence: { key: id },
+          broadcast: { self: false, ack: false }
         }
       });
+
+      channel
+        .on('presence', { event: 'sync' }, () => {
+          syncPresencePlayers();
+        })
+        .on('presence', { event: 'join' }, () => {
+          syncPresencePlayers();
+        })
+        .on('presence', { event: 'leave' }, () => {
+          syncPresencePlayers();
+        })
+        .on('broadcast', { event: 'state' }, ({ payload }) => {
+          if(!payload || payload.id === id) return;
+
+          const existing = others.get(payload.id) || {};
+          payload.lastSeen = performance.now();
+
+          others.set(payload.id, {
+            ...existing,
+            ...payload
+          });
+
+          updateLeaderboard();
+          updatePlayersList();
+        })
+        .subscribe(async (status, err) => {
+          if(status === 'SUBSCRIBED'){
+            statusEl.textContent = 'Connecté live : room ' + room;
+            await channel.track(makePresencePayload());
+            syncPresencePlayers();
+          } else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+            statusEl.textContent = 'Mode local : Supabase ' + status;
+          } else if(err) {
+            statusEl.textContent = 'Mode local : erreur Supabase';
+          } else {
+            statusEl.textContent = 'Connexion Supabase : ' + status;
+          }
+        });
+    } catch (e) {
+      console.error(e);
+      statusEl.textContent = 'Mode local : erreur JS/Supabase';
+    }
+  }
+
+  function makePresencePayload(){
+    return {
+      id,
+      name: state.name,
+      color: state.color,
+      eyeColor: state.eyeColor,
+      style: state.style,
+      floor: state.floor,
+      combo: state.combo,
+      x: state.x,
+      y: state.y,
+      joinedAt: Date.now()
+    };
+  }
+
+  function syncPresencePlayers(){
+    if(!channel) return;
+
+    const presence = channel.presenceState();
+    const ids = Object.keys(presence);
+    onlineHud.textContent = ids.length || 1;
+
+    const presentIds = new Set();
+
+    for(const key of ids){
+      const entries = presence[key] || [];
+      const p = entries[entries.length - 1];
+      if(!p || p.id === id) continue;
+
+      presentIds.add(p.id);
+
+      const existing = others.get(p.id) || {};
+      others.set(p.id, {
+        ...existing,
+        ...p,
+        x: existing.x ?? p.x ?? W / 2,
+        y: existing.y ?? p.y ?? H - 160,
+        floor: existing.floor ?? p.floor ?? 0,
+        combo: existing.combo ?? p.combo ?? 0,
+        lastSeen: performance.now()
+      });
+    }
+
+    for(const oid of Array.from(others.keys())){
+      if(!presentIds.has(oid)){
+        const p = others.get(oid);
+        if(p && performance.now() - (p.lastSeen || 0) > 4500){
+          others.delete(oid);
+        }
+      }
+    }
+
+    updateLeaderboard();
+    updatePlayersList();
   }
 
   function broadcast(){
     if(!channel || performance.now() - state.lastBroadcast < 50) return;
     state.lastBroadcast = performance.now();
+    const payload = {
+      id, name: state.name, color: state.color, eyeColor: state.eyeColor, style: state.style,
+      x: state.x, y: state.y, floor: state.floor,
+      combo: state.combo, alive: state.alive
+    };
+
     channel.send({
       type: 'broadcast',
       event: 'state',
-      payload: {
-        id, name: state.name, color: state.color, eyeColor: state.eyeColor, style: state.style,
-        x: state.x, y: state.y, floor: state.floor,
-        combo: state.combo, alive: state.alive
-      }
+      payload
     });
+
+    // Update aussi Presence pour que le classement reste visible même si un joueur bouge peu.
+    if(Math.random() < 0.08){
+      channel.track(makePresencePayload());
+    }
   }
 
   function update(dt){
@@ -259,6 +354,7 @@
     floorHud.textContent = state.floor;
     comboHud.textContent = state.combo;
     updateLeaderboard();
+    updatePlayersList();
     broadcast();
   }
 
@@ -354,12 +450,47 @@
   }
 
   function updateLeaderboard(){
-    const list = [
-      {name: state.name, floor: state.floor, combo: state.combo},
-      ...Array.from(others.values()).map(p => ({name:p.name, floor:p.floor||0, combo:p.combo||0}))
-    ].sort((a,b)=>b.floor-a.floor).slice(0,8);
+    const seen = new Map();
 
-    leaderList.innerHTML = list.map(p => `<li><b>${escapeHtml(p.name || 'Player')}</b> — ${p.floor}</li>`).join('');
+    seen.set(id, {
+      name: state.name,
+      floor: state.floor,
+      combo: state.combo,
+      color: state.color
+    });
+
+    for(const p of others.values()){
+      seen.set(p.id || p.name, {
+        name: p.name || 'Player',
+        floor: Number(p.floor || 0),
+        combo: Number(p.combo || 0),
+        color: p.color || '#73d7ff'
+      });
+    }
+
+    const list = Array.from(seen.values())
+      .sort((a,b)=>b.floor-a.floor || b.combo-a.combo)
+      .slice(0,8);
+
+    leaderList.innerHTML = list.map(p =>
+      `<li><b>${escapeHtml(p.name || 'Player')}</b> — étage ${p.floor}</li>`
+    ).join('');
+  }
+
+  function updatePlayersList(){
+    const players = [
+      { id, name: state.name, color: state.color, me: true },
+      ...Array.from(others.values()).map(p => ({
+        id: p.id,
+        name: p.name || 'Player',
+        color: p.color || '#73d7ff',
+        me: false
+      }))
+    ];
+
+    playersList.innerHTML = players.map(p =>
+      `<li><span class="dot" style="color:${escapeHtml(p.color)};background:${escapeHtml(p.color)}"></span>${escapeHtml(p.name)}${p.me ? ' <small>(toi)</small>' : ''}</li>`
+    ).join('');
   }
 
   function loop(ts){
@@ -404,10 +535,12 @@
     menu.classList.add('hidden');
     hud.classList.remove('hidden');
     leaderboard.classList.remove('hidden');
+    playersPanel.classList.remove('hidden');
     roomHud.textContent = room;
     resetGame();
     running = true;
-    await connectSupabase();
+    statusEl.textContent = 'Jeu démarré, connexion live en cours...';
+    connectSupabase();
   });
 
 

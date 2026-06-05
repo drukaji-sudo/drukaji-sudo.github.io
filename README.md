@@ -86,3 +86,18 @@ Sans le Project URL, le live/rooms ne peut pas se connecter.
 - Bouton visible `Config Supabase` retiré du menu joueur.
 - Ajout personnalisation du personnage : couleur du corps, couleur des yeux et style.
 - Les personnalisations sont envoyées en live aux autres joueurs dans la room.
+
+
+## Correctif connexion
+
+- URL Supabase ajoutée depuis le projet fourni.
+- Le bouton Jouer démarre maintenant le jeu immédiatement.
+- Si Supabase échoue, le jeu reste jouable en mode local au lieu de bloquer.
+
+
+## Correctif multiplayer live
+
+- Ajout d'une vraie liste des joueurs dans la room.
+- Les joueurs sont détectés avec Supabase Presence.
+- Les positions, couleurs, styles et scores sont synchronisés avec Broadcast.
+- Le classement live affiche maintenant tous les joueurs détectés dans la même room.
