@@ -3,7 +3,6 @@
   const ctx = canvas.getContext('2d');
 
   const menu = document.getElementById('menu');
-  const configPanel = document.getElementById('configPanel');
   const hud = document.getElementById('hud');
   const leaderboard = document.getElementById('leaderboard');
   const statusEl = document.getElementById('status');
@@ -11,11 +10,9 @@
   const playerNameInput = document.getElementById('playerName');
   const roomNameInput = document.getElementById('roomName');
   const joinBtn = document.getElementById('joinBtn');
-  const configBtn = document.getElementById('configBtn');
-  const saveConfigBtn = document.getElementById('saveConfigBtn');
-  const backBtn = document.getElementById('backBtn');
-  const supabaseUrlInput = document.getElementById('supabaseUrl');
-  const supabaseAnonInput = document.getElementById('supabaseAnon');
+  const bodyColorInput = document.getElementById('bodyColor');
+  const eyeColorInput = document.getElementById('eyeColor');
+  const playerStyleInput = document.getElementById('playerStyle');
 
   const floorHud = document.getElementById('floorHud');
   const comboHud = document.getElementById('comboHud');
@@ -25,9 +22,10 @@
 
   const savedCfg = JSON.parse(localStorage.getItem('frostTowerConfig') || '{}');
   const defaultCfg = window.FROST_TOWER_CONFIG || {};
-  supabaseUrlInput.value = savedCfg.SUPABASE_URL || defaultCfg.SUPABASE_URL || '';
-  supabaseAnonInput.value = savedCfg.SUPABASE_ANON_KEY || defaultCfg.SUPABASE_ANON_KEY || '';
   playerNameInput.value = localStorage.getItem('frostTowerName') || '';
+  bodyColorInput.value = localStorage.getItem('frostTowerBodyColor') || '#73d7ff';
+  eyeColorInput.value = localStorage.getItem('frostTowerEyeColor') || '#ffffff';
+  playerStyleInput.value = localStorage.getItem('frostTowerStyle') || 'classic';
 
   let W = 0, H = 0, dpr = 1;
   function resize(){
@@ -53,6 +51,7 @@
     id, name:'Player', color: randomColor(),
     x: 0, y: 0, vx: 0, vy: 0,
     w: 28, h: 42,
+    eyeColor: '#ffffff', style: 'classic',
     grounded: false, alive: true,
     floor: 0, combo: 0, bestCombo: 0,
     cameraY: 0, scrollSpeed: 70,
@@ -167,7 +166,7 @@
       type: 'broadcast',
       event: 'state',
       payload: {
-        id, name: state.name, color: state.color,
+        id, name: state.name, color: state.color, eyeColor: state.eyeColor, style: state.style,
         x: state.x, y: state.y, floor: state.floor,
         combo: state.combo, alive: state.alive
       }
@@ -284,11 +283,11 @@
     }
 
     // joueur local
-    drawPlayer(state.x, state.y, state.name, state.color, true);
+    drawPlayer(state.x, state.y, state.name, state.color, state.eyeColor, state.style, true);
 
     // autres joueurs
     for(const p of others.values()){
-      drawPlayer(p.x, p.y, p.name, p.color, false);
+      drawPlayer(p.x, p.y, p.name, p.color, p.eyeColor || '#ffffff', p.style || 'classic', false);
     }
 
     ctx.restore();
@@ -299,16 +298,49 @@
     ctx.fillText(String(state.floor), W/2, 100);
   }
 
-  function drawPlayer(x,y,name,color,isMe){
+  function drawPlayer(x,y,name,color,eyeColor,style,isMe){
     ctx.fillStyle = color;
     roundRect(ctx,x,y,state.w,state.h,9,true);
+
+    if(style === 'ninja'){
+      ctx.fillStyle = 'rgba(0,0,0,.42)';
+      roundRect(ctx,x+3,y+6,state.w-6,13,6,true);
+    }
+
+    if(style === 'ice'){
+      ctx.fillStyle = 'rgba(255,255,255,.35)';
+      ctx.beginPath();
+      ctx.moveTo(x + state.w/2, y - 8);
+      ctx.lineTo(x + state.w/2 - 8, y + 4);
+      ctx.lineTo(x + state.w/2 + 8, y + 4);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    if(style === 'crown'){
+      ctx.fillStyle = '#ffd85c';
+      ctx.beginPath();
+      ctx.moveTo(x+5,y+1);
+      ctx.lineTo(x+9,y-10);
+      ctx.lineTo(x+14,y+0);
+      ctx.lineTo(x+20,y-10);
+      ctx.lineTo(x+24,y+1);
+      ctx.closePath();
+      ctx.fill();
+    }
+
     ctx.fillStyle = isMe ? '#ffffff' : 'rgba(255,255,255,.82)';
     ctx.font = 'bold 12px Arial';
     ctx.textAlign = 'center';
     ctx.fillText(name || 'Player', x + state.w/2, y - 8);
-    ctx.fillStyle = 'rgba(0,0,0,.28)';
-    ctx.fillRect(x+6,y+10,5,5);
-    ctx.fillRect(x+state.w-11,y+10,5,5);
+
+    ctx.fillStyle = eyeColor || '#ffffff';
+    ctx.fillRect(x+6,y+11,5,5);
+    ctx.fillRect(x+state.w-11,y+11,5,5);
+
+    ctx.fillStyle = 'rgba(0,0,0,.32)';
+    ctx.fillRect(x+7,y+12,2,2);
+    ctx.fillRect(x+state.w-10,y+12,2,2);
   }
 
   function drawSnow(){
@@ -361,8 +393,14 @@
 
   joinBtn.addEventListener('click', async () => {
     state.name = (playerNameInput.value || 'Player').trim().slice(0,16);
+    state.color = bodyColorInput.value || '#73d7ff';
+    state.eyeColor = eyeColorInput.value || '#ffffff';
+    state.style = playerStyleInput.value || 'classic';
     room = (roomNameInput.value || 'friends').trim().replace(/[^a-zA-Z0-9_-]/g,'').slice(0,24) || 'friends';
     localStorage.setItem('frostTowerName', state.name);
+    localStorage.setItem('frostTowerBodyColor', state.color);
+    localStorage.setItem('frostTowerEyeColor', state.eyeColor);
+    localStorage.setItem('frostTowerStyle', state.style);
     menu.classList.add('hidden');
     hud.classList.remove('hidden');
     leaderboard.classList.remove('hidden');
@@ -372,25 +410,6 @@
     await connectSupabase();
   });
 
-  configBtn.addEventListener('click', () => {
-    menu.classList.add('hidden');
-    configPanel.classList.remove('hidden');
-  });
-
-  backBtn.addEventListener('click', () => {
-    configPanel.classList.add('hidden');
-    menu.classList.remove('hidden');
-  });
-
-  saveConfigBtn.addEventListener('click', () => {
-    localStorage.setItem('frostTowerConfig', JSON.stringify({
-      SUPABASE_URL: supabaseUrlInput.value.trim(),
-      SUPABASE_ANON_KEY: supabaseAnonInput.value.trim()
-    }));
-    statusEl.textContent = 'Configuration sauvegardée';
-    configPanel.classList.add('hidden');
-    menu.classList.remove('hidden');
-  });
 
   requestAnimationFrame(loop);
 })();

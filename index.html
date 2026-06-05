@@ -21,32 +21,32 @@
       <label>Room</label>
       <input id="roomName" maxlength="24" value="friends" />
 
+      <div class="customizer">
+        <div>
+          <label>Couleur du personnage</label>
+          <input id="bodyColor" type="color" value="#73d7ff" />
+        </div>
+        <div>
+          <label>Couleur des yeux</label>
+          <input id="eyeColor" type="color" value="#ffffff" />
+        </div>
+      </div>
+
+      <label>Style</label>
+      <select id="playerStyle">
+        <option value="classic">Classique</option>
+        <option value="ninja">Ninja</option>
+        <option value="crown">Couronne</option>
+        <option value="ice">Glace</option>
+      </select>
+
       <div class="row">
         <button id="joinBtn">Jouer</button>
-        <button id="configBtn" class="ghost">Config Supabase</button>
       </div>
 
       <p class="hint">
         Contrôles : ← → / A D pour bouger, Espace/W/↑ pour sauter.
       </p>
-    </section>
-
-    <section id="configPanel" class="panel hidden">
-      <h2>Configuration Supabase</h2>
-      <p class="sub small">
-        Mets ton URL Supabase et ta clé anon/public. C’est sauvegardé dans ton navigateur.
-      </p>
-
-      <label>SUPABASE_URL</label>
-      <input id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
-
-      <label>SUPABASE_ANON_KEY</label>
-      <textarea id="supabaseAnon" placeholder="eyJhbGciOiJI..."></textarea>
-
-      <div class="row">
-        <button id="saveConfigBtn">Sauvegarder</button>
-        <button id="backBtn" class="ghost">Retour</button>
-      </div>
     </section>
 
     <aside id="hud" class="hidden">

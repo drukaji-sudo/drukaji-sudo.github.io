@@ -79,3 +79,10 @@ SUPABASE_URL: "https://TON-PROJET.supabase.co"
 ```
 
 Sans le Project URL, le live/rooms ne peut pas se connecter.
+
+
+## Mise à jour personnalisation
+
+- Bouton visible `Config Supabase` retiré du menu joueur.
+- Ajout personnalisation du personnage : couleur du corps, couleur des yeux et style.
+- Les personnalisations sont envoyées en live aux autres joueurs dans la room.
