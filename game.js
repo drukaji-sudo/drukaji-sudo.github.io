@@ -153,7 +153,7 @@
 
       supa = window.supabase.createClient(url, anon);
       dbLiveReady = true;
-      statusEl.textContent = 'Live connecté : room ' + room;
+      statusEl.textContent = 'Live fluide connecté : room ' + room;
 
       await pushDbState(true);
       await pullDbPlayers(true);
@@ -167,7 +167,7 @@
   async function pushDbState(force=false){
     if(!supa || !dbLiveReady) return;
     const now = performance.now();
-    if(!force && now - lastDbPush < 100) return;
+    if(!force && now - lastDbPush < 45) return;
     lastDbPush = now;
 
     const row = {
@@ -199,7 +199,7 @@
   async function pullDbPlayers(force=false){
     if(!supa || !dbLiveReady) return;
     const now = performance.now();
-    if(!force && now - lastDbPull < 160) return;
+    if(!force && now - lastDbPull < 70) return;
     lastDbPull = now;
 
     const cutoff = new Date(Date.now() - 12000).toISOString();
@@ -222,14 +222,25 @@
     for(const p of data || []){
       if(p.player_id === id) continue;
       presentIds.add(p.player_id);
+      const oldPlayer = others.get(p.player_id);
+      const targetX = Number(p.x || W / 2);
+      const targetY = Number(p.y || H - 160);
+
       others.set(p.player_id, {
         id: p.player_id,
         name: p.name || 'Player',
         color: p.color || '#73d7ff',
         eyeColor: p.eye_color || '#ffffff',
         style: p.style || 'classic',
-        x: Number(p.x || W / 2),
-        y: Number(p.y || H - 160),
+
+        // position affichée localement
+        x: oldPlayer ? oldPlayer.x : targetX,
+        y: oldPlayer ? oldPlayer.y : targetY,
+
+        // position cible reçue de Supabase
+        targetX,
+        targetY,
+
         floor: Number(p.floor || 0),
         combo: Number(p.combo || 0),
         alive: Boolean(p.alive),
@@ -250,6 +261,17 @@
     if(!dbLiveReady) return;
     pushDbState(false);
     pullDbPlayers(false);
+  }
+
+  function smoothOtherPlayers(dt){
+    for(const p of others.values()){
+      if(typeof p.targetX !== 'number') p.targetX = p.x;
+      if(typeof p.targetY !== 'number') p.targetY = p.y;
+
+      const speed = Math.min(1, dt * 18);
+      p.x += (p.targetX - p.x) * speed;
+      p.y += (p.targetY - p.y) * speed;
+    }
   }
 
   function update(dt){
@@ -314,6 +336,7 @@
     floorHud.textContent = state.floor;
     comboHud.textContent = state.combo;
 
+    smoothOtherPlayers(dt);
     updateLeaderboard();
     updatePlayersList();
     dbLiveTick();
@@ -369,8 +392,13 @@
 
       for(const p of others.values()){
         const screenY = p.y - state.cameraY;
+
         if(screenY > -80 && screenY < H + 80){
           drawPlayer(p.x, p.y, p.name, p.color, p.eyeColor, p.style, false);
+        } else {
+          // Fantôme de position sur le bord de l'écran pour voir l'ami en permanence.
+          const edgeY = screenY < 0 ? state.cameraY + 38 : state.cameraY + H - 52;
+          drawPlayer(p.x, edgeY, p.name + (screenY < 0 ? ' ↑' : ' ↓'), p.color, p.eyeColor, p.style, false);
         }
       }
     }
@@ -415,7 +443,9 @@
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 11px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(`${p.name || 'Player'} ${screenY < 0 ? '↑' : '↓'}`, x, y + (screenY < 0 ? 24 : -16));
+    const diff = Number(p.floor || 0) - Number(state.floor || 0);
+    const floorText = diff === 0 ? 'même étage' : (diff > 0 ? `+${diff} étages` : `${diff} étages`);
+    ctx.fillText(`${p.name || 'Player'} ${screenY < 0 ? '↑' : '↓'} ${floorText}`, x, y + (screenY < 0 ? 24 : -16));
   }
 
   function drawPlayer(x,y,name,color,eyeColor,style,isMe){

@@ -18,3 +18,11 @@ Version corrigée complète.
 - Positions synchronisées.
 - Même map/platformes pour tous dans la même room.
 - Personnalisation : couleur, yeux, style.
+
+
+## Mise à jour fluidité live
+
+- Envoi position plus fréquent.
+- Lecture Supabase plus fréquente.
+- Interpolation visuelle des autres joueurs.
+- Les amis restent visibles en permanence via fantôme/indicateur en haut ou en bas.
