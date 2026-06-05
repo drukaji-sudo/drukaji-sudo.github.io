@@ -47,6 +47,9 @@
   let supa = null;
   let channel = null;
   let room = 'friends';
+  let dbLiveReady = false;
+  let lastDbPush = 0;
+  let lastDbPull = 0;
   const others = new Map();
 
   const state = {
@@ -68,7 +71,31 @@
     return colors[Math.floor(Math.random()*colors.length)];
   }
 
+  function hashString(str){
+    let h = 2166136261;
+    for(let i = 0; i < str.length; i++){
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function mulberry32(seed){
+    return function(){
+      seed |= 0;
+      seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function roomRandom(extra = 0){
+    return mulberry32(hashString(room || 'friends') + extra);
+  }
+
   function resetGame(){
+    const rand = roomRandom(1000);
     const spawnPlatformY = H - 86;
 
     state.x = W / 2 - state.w / 2;
@@ -85,7 +112,6 @@
 
     platforms = [];
 
-    // Plateforme de départ garantie sous le joueur.
     platforms.push({
       x: Math.max(20, W / 2 - 125),
       y: spawnPlatformY,
@@ -94,12 +120,10 @@
       floor: 0
     });
 
-    // Premières plateformes rapprochées pour que le jump soit naturel.
-    // L'écart vertical augmente doucement avec la difficulté.
     let y = spawnPlatformY - 70;
     let lastX = W / 2 - 75;
 
-    for(let i = 1; i < 18; i++){
+    for(let i = 1; i < 42; i++){
       const gap = Math.min(102, 68 + i * 2.2);
       y -= gap;
 
@@ -107,7 +131,7 @@
       const maxHorizontalReach = Math.min(210, 110 + i * 6);
       const minX = Math.max(24, lastX - maxHorizontalReach);
       const maxX = Math.min(W - width - 24, lastX + maxHorizontalReach);
-      const x = minX + Math.random() * Math.max(1, maxX - minX);
+      const x = minX + rand() * Math.max(1, maxX - minX);
 
       platforms.push({
         x,
@@ -137,61 +161,20 @@
         return;
       }
 
-      supa = window.supabase.createClient(url, anon, {
-        realtime: { params: { eventsPerSecond: 30 } }
-      });
+      supa = window.supabase.createClient(url, anon);
+      dbLiveReady = true;
+      statusEl.textContent = 'Connecté live DB : room ' + room;
 
-      channel = supa.channel(`frost-tower-room-${room}`, {
-        config: {
-          presence: { key: id },
-          broadcast: { self: false, ack: false }
-        }
-      });
-
-      channel
-        .on('presence', { event: 'sync' }, () => {
-          syncPresencePlayers();
-        })
-        .on('presence', { event: 'join' }, () => {
-          syncPresencePlayers();
-        })
-        .on('presence', { event: 'leave' }, () => {
-          syncPresencePlayers();
-        })
-        .on('broadcast', { event: 'state' }, ({ payload }) => {
-          if(!payload || payload.id === id) return;
-
-          const existing = others.get(payload.id) || {};
-          payload.lastSeen = performance.now();
-
-          others.set(payload.id, {
-            ...existing,
-            ...payload
-          });
-
-          updateLeaderboard();
-          updatePlayersList();
-        })
-        .subscribe(async (status, err) => {
-          if(status === 'SUBSCRIBED'){
-            statusEl.textContent = 'Connecté live : room ' + room;
-            await channel.track(makePresencePayload());
-            syncPresencePlayers();
-          } else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
-            statusEl.textContent = 'Supabase ' + status + ' : exécute supabase-realtime-policy.sql';
-          } else if(err) {
-            statusEl.textContent = 'Mode local : erreur Supabase';
-          } else {
-            statusEl.textContent = 'Connexion Supabase : ' + status;
-          }
-        });
+      await pushDbState(true);
+      await pullDbPlayers();
     } catch (e) {
       console.error(e);
-      statusEl.textContent = 'Mode local : erreur JS/Supabase';
+      dbLiveReady = false;
+      statusEl.textContent = 'Mode local : crée la table frost_tower_players';
     }
   }
 
-  function makePresencePayload(){
+(){
     return {
       id,
       name: state.name,
@@ -206,66 +189,101 @@
     };
   }
 
-  function syncPresencePlayers(){
-    if(!channel) return;
+  async function pushDbState(force=false){
+    if(!supa || !dbLiveReady) return;
+    const now = performance.now();
+    if(!force && now - lastDbPush < 80) return;
+    lastDbPush = now;
 
-    const presence = channel.presenceState();
-    const ids = Object.keys(presence);
-    onlineHud.textContent = ids.length || 1;
+    try {
+      const row = {
+        room,
+        player_id: id,
+        name: state.name,
+        color: state.color,
+        eye_color: state.eyeColor,
+        style: state.style,
+        x: state.x,
+        y: state.y,
+        floor: state.floor,
+        combo: state.combo,
+        alive: state.alive,
+        updated_at: new Date().toISOString()
+      };
 
-    const presentIds = new Set();
+      const { error } = await supa
+        .from('frost_tower_players')
+        .upsert(row, { onConflict: 'room,player_id' });
 
-    for(const key of ids){
-      const entries = presence[key] || [];
-      const p = entries[entries.length - 1];
-      if(!p || p.id === id) continue;
-
-      presentIds.add(p.id);
-
-      const existing = others.get(p.id) || {};
-      others.set(p.id, {
-        ...existing,
-        ...p,
-        x: existing.x ?? p.x ?? W / 2,
-        y: existing.y ?? p.y ?? H - 160,
-        floor: existing.floor ?? p.floor ?? 0,
-        combo: existing.combo ?? p.combo ?? 0,
-        lastSeen: performance.now()
-      });
+      if(error) throw error;
+      statusEl.textContent = 'Live connecté : room ' + room;
+    } catch (e) {
+      console.error(e);
+      dbLiveReady = false;
+      statusEl.textContent = 'Live DB erreur : exécute supabase-db-live.sql';
     }
+  }
 
-    for(const oid of Array.from(others.keys())){
-      if(!presentIds.has(oid)){
-        const p = others.get(oid);
-        if(p && performance.now() - (p.lastSeen || 0) > 4500){
-          others.delete(oid);
-        }
+  async function pullDbPlayers(){
+    if(!supa || !dbLiveReady) return;
+    const now = performance.now();
+    if(now - lastDbPull < 120) return;
+    lastDbPull = now;
+
+    try {
+      const cutoff = new Date(Date.now() - 12000).toISOString();
+
+      const { data, error } = await supa
+        .from('frost_tower_players')
+        .select('*')
+        .eq('room', room)
+        .gte('updated_at', cutoff);
+
+      if(error) throw error;
+
+      const presentIds = new Set();
+
+      for(const p of data || []){
+        if(p.player_id === id) continue;
+        presentIds.add(p.player_id);
+
+        others.set(p.player_id, {
+          id: p.player_id,
+          name: p.name || 'Player',
+          color: p.color || '#73d7ff',
+          eyeColor: p.eye_color || '#ffffff',
+          style: p.style || 'classic',
+          x: Number(p.x || W / 2),
+          y: Number(p.y || H - 160),
+          floor: Number(p.floor || 0),
+          combo: Number(p.combo || 0),
+          alive: !!p.alive,
+          lastSeen: performance.now()
+        });
       }
-    }
 
-    updateLeaderboard();
-    updatePlayersList();
+      for(const oid of Array.from(others.keys())){
+        if(!presentIds.has(oid)) others.delete(oid);
+      }
+
+      onlineHud.textContent = String((data || []).length || 1);
+      updateLeaderboard();
+      updatePlayersList();
+    } catch (e) {
+      console.error(e);
+      dbLiveReady = false;
+      statusEl.textContent = 'Live DB erreur : exécute supabase-db-live.sql';
+    }
+  }
+
+  async function dbLiveTick(){
+    if(!dbLiveReady) return;
+    pushDbState(false);
+    pullDbPlayers();
   }
 
   function broadcast(){
-    if(!channel || performance.now() - state.lastBroadcast < 50) return;
-    state.lastBroadcast = performance.now();
-    const payload = {
-      id, name: state.name, color: state.color, eyeColor: state.eyeColor, style: state.style,
-      x: state.x, y: state.y, floor: state.floor,
-      combo: state.combo, alive: state.alive
-    };
-
-    channel.send({
-      type: 'broadcast',
-      event: 'state',
-      payload
-    });
-
-    // Update aussi Presence pour que le classement reste visible même si un joueur bouge peu.
-    if(Math.random() < 0.08){
-      channel.track(makePresencePayload());
-    }
+    dbLiveTick();
   }
 
   function update(dt){
@@ -318,20 +336,22 @@
 
     const topNeeded = state.cameraY - 120;
     while(Math.min(...platforms.map(p=>p.y)) > topNeeded){
-      const highestPlatform = platforms.reduce((a,b) => a.y < b.y ? a : b);
       const nextFloor = Math.max(...platforms.map(p=>p.floor)) + 1;
+      const rand = roomRandom(1000 + nextFloor);
+      const prev = platforms.find(p => p.floor === nextFloor - 1) || platforms.reduce((a,b) => a.y < b.y ? a : b);
+
       const difficulty = Math.min(72, nextFloor * 1.15);
       const width = Math.max(78, 160 - difficulty);
       const gap = Math.min(108, 72 + nextFloor * 0.65);
 
       const maxHorizontalReach = Math.min(230, 120 + nextFloor * 1.5);
-      const minX = Math.max(22, highestPlatform.x - maxHorizontalReach);
-      const maxX = Math.min(W - width - 22, highestPlatform.x + maxHorizontalReach);
-      const x = minX + Math.random() * Math.max(1, maxX - minX);
+      const minX = Math.max(22, prev.x - maxHorizontalReach);
+      const maxX = Math.min(W - width - 22, prev.x + maxHorizontalReach);
+      const x = minX + rand() * Math.max(1, maxX - minX);
 
       platforms.push({
         x,
-        y: highestPlatform.y - gap,
+        y: prev.y - gap,
         w: width,
         h: 14,
         floor: nextFloor
@@ -383,15 +403,41 @@
 
     // autres joueurs
     for(const p of others.values()){
-      drawPlayer(p.x, p.y, p.name, p.color, p.eyeColor || '#ffffff', p.style || 'classic', false);
+      const screenY = p.y - state.cameraY;
+      if(screenY > -80 && screenY < H + 80){
+        drawPlayer(p.x, p.y, p.name, p.color, p.eyeColor || '#ffffff', p.style || 'classic', false);
+      }
     }
 
     ctx.restore();
+
+    // Indicateurs pour les amis hors écran.
+    for(const p of others.values()){
+      const screenY = p.y - state.cameraY;
+      if(screenY <= -80 || screenY >= H + 80){
+        drawFriendIndicator(p, screenY);
+      }
+    }
 
     ctx.fillStyle = 'rgba(255,255,255,.12)';
     ctx.font = 'bold 72px Arial';
     ctx.textAlign = 'center';
     ctx.fillText(String(state.floor), W/2, 100);
+  }
+
+  function drawFriendIndicator(p, screenY){
+    const x = Math.max(28, Math.min(W - 28, p.x || W / 2));
+    const y = screenY < 0 ? 28 : H - 28;
+    ctx.fillStyle = p.color || '#73d7ff';
+    ctx.beginPath();
+    ctx.arc(x, y, 9, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11px Arial';
+    ctx.textAlign = 'center';
+    const label = `${p.name || 'Player'} ${screenY < 0 ? '↑' : '↓'}`;
+    ctx.fillText(label, x, y + (screenY < 0 ? 24 : -16));
   }
 
   function drawPlayer(x,y,name,color,eyeColor,style,isMe){

@@ -110,3 +110,28 @@ Va dans Supabase > SQL Editor et exécute le fichier :
 `supabase-realtime-policy.sql`
 
 Sans ces politiques, Supabase peut fermer le channel Realtime et les amis ne seront pas visibles dans la room.
+
+
+## Correctif final live DB
+
+Le jeu n'utilise plus les channels Realtime qui donnaient `Supabase CLOSED`.
+
+À faire :
+1. Supabase > SQL Editor
+2. Exécute `supabase-db-live.sql`
+3. Upload le ZIP sur GitHub Pages
+4. Ouvre deux fenêtres avec la même room
+
+Le live utilise maintenant une table `frost_tower_players` :
+- positions
+- couleurs/personnages
+- joueurs présents
+- classement live
+
+
+## Correctif visibilité des amis
+
+- Les plateformes sont maintenant générées de façon déterministe par room.
+- Tous les joueurs dans la même room ont donc exactement la même map.
+- La synchronisation Supabase DB est plus rapide.
+- Si un ami est trop haut ou trop bas, un indicateur apparaît en haut/bas de l'écran.
