@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Frost Tower Live</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="game"></canvas>
+
+    <section id="menu" class="panel">
+      <h1>Frost Tower <span>Live</span></h1>
+      <p class="sub">Monte le plus haut possible avec tes amis en live.</p>
+
+      <label>Nom du joueur</label>
+      <input id="playerName" maxlength="16" placeholder="Ex: Dilan" />
+
+      <label>Room</label>
+      <input id="roomName" maxlength="24" value="friends" />
+
+      <div class="row">
+        <button id="joinBtn">Jouer</button>
+        <button id="configBtn" class="ghost">Config Supabase</button>
+      </div>
+
+      <p class="hint">
+        Contrôles : ← → / A D pour bouger, Espace/W/↑ pour sauter.
+      </p>
+    </section>
+
+    <section id="configPanel" class="panel hidden">
+      <h2>Configuration Supabase</h2>
+      <p class="sub small">
+        Mets ton URL Supabase et ta clé anon/public. C’est sauvegardé dans ton navigateur.
+      </p>
+
+      <label>SUPABASE_URL</label>
+      <input id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
+
+      <label>SUPABASE_ANON_KEY</label>
+      <textarea id="supabaseAnon" placeholder="eyJhbGciOiJI..."></textarea>
+
+      <div class="row">
+        <button id="saveConfigBtn">Sauvegarder</button>
+        <button id="backBtn" class="ghost">Retour</button>
+      </div>
+    </section>
+
+    <aside id="hud" class="hidden">
+      <div><b>Étage</b> <span id="floorHud">0</span></div>
+      <div><b>Combo</b> <span id="comboHud">0</span></div>
+      <div><b>Room</b> <span id="roomHud">-</span></div>
+      <div><b>Live</b> <span id="onlineHud">1</span></div>
+    </aside>
+
+    <aside id="leaderboard" class="hidden">
+      <h3>Classement</h3>
+      <ol id="leaderList"></ol>
+    </aside>
+
+    <div id="status">Hors ligne</div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
