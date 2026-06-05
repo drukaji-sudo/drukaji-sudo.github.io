@@ -1,5 +1,5 @@
 // Configuration Supabase pour Frost Tower Live.
-// Clé publishable seulement. Ne jamais mettre de clé sb_secret ici.
+// Ne mets jamais de clé sb_secret ici.
 
 window.FROST_TOWER_CONFIG = {
   SUPABASE_URL: "https://jhadykhcrwhqcmjtcnfs.supabase.co",
