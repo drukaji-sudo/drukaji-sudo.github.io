@@ -79,7 +79,8 @@
     combo: 0,
     bestCombo: 0,
     cameraY: 0,
-    scrollSpeed: 55
+    scrollSpeed: 55,
+    spawnSafeTimer: 0
   };
 
   let platforms = [];
@@ -123,11 +124,12 @@
     state.cameraY = state.y - H * 0.72;
     state.scrollSpeed = 55;
     state.alive = true;
+    state.spawnSafeTimer = 0.9;
 
     platforms = [{
-      x: Math.max(20, WORLD_W / 2 - 125),
+      x: Math.max(20, WORLD_W / 2 - 220),
       y: spawnPlatformY,
-      w: Math.min(250, WORLD_W - 40),
+      w: Math.min(440, WORLD_W - 40),
       h: 16,
       floor: 0
     }];
@@ -309,7 +311,23 @@
       return;
     }
 
+    const jumpPressed = !!(keys.Space || keys.ArrowUp || keys.KeyW);
     const move = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
+
+    if(state.spawnSafeTimer > 0){
+      state.spawnSafeTimer = Math.max(0, state.spawnSafeTimer - dt);
+      const startPlatform = platforms.find(p => p.floor === 0) || platforms[0];
+      if(startPlatform && !jumpPressed){
+        // Au départ, on garde le joueur solidement posé sur la première plateforme.
+        // Ça empêche le petit décrochage visuel/physique qui faisait tomber en boucle.
+        state.x = Math.max(startPlatform.x + 12, Math.min(startPlatform.x + startPlatform.w - state.w - 12, state.x));
+        state.y = startPlatform.y - state.h;
+        state.vx = 0;
+        state.vy = 0;
+        state.grounded = true;
+      }
+    }
+
     state.vx += move * 2500 * dt;
     state.vx *= Math.pow(0.0008, dt);
     state.x += state.vx * dt;
@@ -317,16 +335,24 @@
     if(state.x < -state.w) state.x = WORLD_W + state.w;
     if(state.x > WORLD_W + state.w) state.x = -state.w;
 
-    state.vy += 1350 * dt;
-    state.y += state.vy * dt;
+    const wasBottom = state.y + state.h;
+    const wasGrounded = state.grounded;
+
+    if(!wasGrounded || jumpPressed){
+      state.vy += 1350 * dt;
+      state.y += state.vy * dt;
+    }
+
     state.grounded = false;
 
     for(const p of platforms){
-      const wasAbove = state.y + state.h - state.vy * dt <= p.y;
       const overlapping = state.x + state.w > p.x && state.x < p.x + p.w;
       const falling = state.vy >= 0;
+      const newBottom = state.y + state.h;
+      const crossedPlatform = wasBottom <= p.y + 4 && newBottom >= p.y;
+      const closeToTop = newBottom >= p.y && newBottom <= p.y + 38;
 
-      if(falling && wasAbove && overlapping && state.y + state.h >= p.y && state.y + state.h <= p.y + 26){
+      if(falling && overlapping && (crossedPlatform || closeToTop)){
         state.y = p.y - state.h;
         state.vy = 0;
         state.grounded = true;
@@ -340,7 +366,7 @@
       }
     }
 
-    if((keys.Space || keys.ArrowUp || keys.KeyW) && state.grounded){
+    if(jumpPressed && state.grounded){
       const boost = Math.min(260, Math.abs(state.vx) * 0.16);
       state.vy = -585 - boost;
       state.grounded = false;
