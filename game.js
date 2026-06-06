@@ -53,6 +53,18 @@
   let lastDbPull = 0;
   const others = new Map();
 
+  // Monde partagé en coop : indépendant de la taille d'écran de chaque joueur.
+  // Avant, les plateformes et le spawn utilisaient W/H du navigateur, donc
+  // chaque joueur voyait un monde différent et les amis semblaient placés n'importe où.
+  const WORLD_W = 900;
+  const WORLD_SPAWN_Y = 0;
+  const PLAYER_W = 28;
+  const PLAYER_H = 42;
+
+  function viewX(){
+    return Math.floor((W - WORLD_W) / 2);
+  }
+
   const state = {
     id,
     name: 'Player',
@@ -60,7 +72,7 @@
     eyeColor: '#ffffff',
     style: 'classic',
     x: 0, y: 0, vx: 0, vy: 0,
-    w: 28, h: 42,
+    w: PLAYER_W, h: PLAYER_H,
     grounded: false,
     alive: true,
     floor: 0,
@@ -98,9 +110,9 @@
 
   function resetGame(){
     const rand = roomRandom(1000);
-    const spawnPlatformY = H - 86;
+    const spawnPlatformY = WORLD_SPAWN_Y;
 
-    state.x = W / 2 - state.w / 2;
+    state.x = WORLD_W / 2 - state.w / 2;
     state.y = spawnPlatformY - state.h;
     state.vx = 0;
     state.vy = 0;
@@ -108,20 +120,20 @@
     state.floor = 0;
     state.combo = 0;
     state.bestCombo = 0;
-    state.cameraY = 0;
+    state.cameraY = state.y - H * 0.72;
     state.scrollSpeed = 55;
     state.alive = true;
 
     platforms = [{
-      x: Math.max(20, W / 2 - 125),
+      x: Math.max(20, WORLD_W / 2 - 125),
       y: spawnPlatformY,
-      w: Math.min(250, W - 40),
+      w: Math.min(250, WORLD_W - 40),
       h: 16,
       floor: 0
     }];
 
     let y = spawnPlatformY - 70;
-    let lastX = W / 2 - 75;
+    let lastX = WORLD_W / 2 - 75;
 
     for(let i = 1; i < 50; i++){
       const gap = Math.min(102, 68 + i * 2.2);
@@ -129,7 +141,7 @@
       const width = Math.max(86, 170 - i * 3);
       const maxHorizontalReach = Math.min(210, 110 + i * 6);
       const minX = Math.max(24, lastX - maxHorizontalReach);
-      const maxX = Math.min(W - width - 24, lastX + maxHorizontalReach);
+      const maxX = Math.min(WORLD_W - width - 24, lastX + maxHorizontalReach);
       const x = minX + rand() * Math.max(1, maxX - minX);
       platforms.push({x, y, w: width, h: 14, floor: i});
       lastX = x;
@@ -167,7 +179,7 @@
   async function pushDbState(force=false){
     if(!supa || !dbLiveReady) return;
     const now = performance.now();
-    if(!force && now - lastDbPush < 45) return;
+    if(!force && now - lastDbPush < 28) return;
     lastDbPush = now;
 
     const row = {
@@ -199,7 +211,7 @@
   async function pullDbPlayers(force=false){
     if(!supa || !dbLiveReady) return;
     const now = performance.now();
-    if(!force && now - lastDbPull < 70) return;
+    if(!force && now - lastDbPull < 35) return;
     lastDbPull = now;
 
     const cutoff = new Date(Date.now() - 12000).toISOString();
@@ -223,8 +235,14 @@
       if(p.player_id === id) continue;
       presentIds.add(p.player_id);
       const oldPlayer = others.get(p.player_id);
-      const targetX = Number(p.x || W / 2);
-      const targetY = Number(p.y || H - 160);
+      const targetX = Number(p.x || WORLD_W / 2);
+      const targetY = Number(p.y || WORLD_SPAWN_Y - PLAYER_H);
+      const nowSeen = performance.now();
+      const prevTargetX = oldPlayer ? Number(oldPlayer.targetX ?? oldPlayer.x ?? targetX) : targetX;
+      const prevTargetY = oldPlayer ? Number(oldPlayer.targetY ?? oldPlayer.y ?? targetY) : targetY;
+      const elapsed = oldPlayer ? Math.max(0.016, (nowSeen - Number(oldPlayer.lastSeen || nowSeen)) / 1000) : 0.016;
+      const netVx = (targetX - prevTargetX) / elapsed;
+      const netVy = (targetY - prevTargetY) / elapsed;
 
       others.set(p.player_id, {
         id: p.player_id,
@@ -240,11 +258,13 @@
         // position cible reçue de Supabase
         targetX,
         targetY,
+        netVx,
+        netVy,
 
         floor: Number(p.floor || 0),
         combo: Number(p.combo || 0),
         alive: Boolean(p.alive),
-        lastSeen: performance.now()
+        lastSeen: nowSeen
       });
     }
 
@@ -268,9 +288,18 @@
       if(typeof p.targetX !== 'number') p.targetX = p.x;
       if(typeof p.targetY !== 'number') p.targetY = p.y;
 
-      const speed = Math.min(1, dt * 18);
-      p.x += (p.targetX - p.x) * speed;
-      p.y += (p.targetY - p.y) * speed;
+      // Petite prédiction réseau pour que les mouvements soient fluides entre deux lectures DB.
+      const age = Math.min(0.12, Math.max(0, (performance.now() - Number(p.lastSeen || performance.now())) / 1000));
+      const predictedX = p.targetX + Number(p.netVx || 0) * age;
+      const predictedY = p.targetY + Number(p.netVy || 0) * age;
+      const speed = Math.min(1, dt * 24);
+
+      p.x += (predictedX - p.x) * speed;
+      p.y += (predictedY - p.y) * speed;
+
+      // Empêche un vieux paquet ou un lag de laisser le joueur très loin de sa vraie position.
+      if(Math.abs(p.x - p.targetX) > 180) p.x = p.targetX;
+      if(Math.abs(p.y - p.targetY) > 220) p.y = p.targetY;
     }
   }
 
@@ -285,8 +314,8 @@
     state.vx *= Math.pow(0.0008, dt);
     state.x += state.vx * dt;
 
-    if(state.x < -state.w) state.x = W + state.w;
-    if(state.x > W + state.w) state.x = -state.w;
+    if(state.x < -state.w) state.x = WORLD_W + state.w;
+    if(state.x > WORLD_W + state.w) state.x = -state.w;
 
     state.vy += 1350 * dt;
     state.y += state.vy * dt;
@@ -355,7 +384,7 @@
       const gap = Math.min(108, 72 + nextFloor * 0.65);
       const maxHorizontalReach = Math.min(230, 120 + nextFloor * 1.5);
       const minX = Math.max(22, prev.x - maxHorizontalReach);
-      const maxX = Math.min(W - width - 22, prev.x + maxHorizontalReach);
+      const maxX = Math.min(WORLD_W - width - 22, prev.x + maxHorizontalReach);
       const x = minX + rand() * Math.max(1, maxX - minX);
 
       platforms.push({
@@ -378,7 +407,7 @@
     drawSnow();
 
     ctx.save();
-    ctx.translate(0, -state.cameraY);
+    ctx.translate(viewX(), -state.cameraY);
 
     for(const p of platforms){
       ctx.fillStyle = 'rgba(210,245,255,.92)';
@@ -386,6 +415,11 @@
       ctx.fillStyle = 'rgba(115,215,255,.35)';
       roundRect(ctx,p.x,p.y+p.h-4,p.w,4,6,true);
     }
+
+    // Bordures discrètes du monde partagé.
+    ctx.fillStyle = 'rgba(255,255,255,.10)';
+    ctx.fillRect(0, state.cameraY - 80, 2, H + 160);
+    ctx.fillRect(WORLD_W - 2, state.cameraY - 80, 2, H + 160);
 
     if(running){
       drawPlayer(state.x, state.y, state.name, state.color, state.eyeColor, state.style, true);
@@ -433,7 +467,7 @@
   }
 
   function drawFriendIndicator(p, screenY){
-    const x = Math.max(28, Math.min(W - 28, p.x || W / 2));
+    const x = Math.max(28, Math.min(W - 28, viewX() + (p.x || WORLD_W / 2)));
     const y = screenY < 0 ? 28 : H - 28;
     ctx.fillStyle = p.color || '#73d7ff';
     ctx.beginPath();
