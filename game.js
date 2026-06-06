@@ -43,11 +43,16 @@
   addEventListener('resize', resize);
   resize();
 
-  const PLAYER_ID_KEY = 'frostTowerStablePlayerId';
-  let id = localStorage.getItem(PLAYER_ID_KEY);
+  // IMPORTANT LIVE COOP:
+  // Le player_id ne doit PAS être dans localStorage, sinon deux onglets/appareils
+  // de test dans le même navigateur partagent le même ID et s'écrasent dans Supabase.
+  // sessionStorage garde le même ID pendant un refresh du même onglet, mais donne
+  // un vrai joueur différent aux autres onglets.
+  const PLAYER_ID_KEY = 'frostTowerTabPlayerId';
+  let id = sessionStorage.getItem(PLAYER_ID_KEY);
   if(!id){
     id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random()));
-    localStorage.setItem(PLAYER_ID_KEY, id);
+    sessionStorage.setItem(PLAYER_ID_KEY, id);
   }
   const keys = {};
   let running = false;
@@ -191,7 +196,7 @@
     const cleanName = normalizePlayerName(state.name);
     if(!cleanName) return true;
 
-    const cutoff = new Date(Date.now() - 12000).toISOString();
+    const cutoff = new Date(Date.now() - 7000).toISOString();
     const { data, error } = await supa
       .from('frost_tower_players')
       .select('player_id,name,updated_at')
@@ -213,7 +218,7 @@
 
       // Si le doublon ne bouge plus depuis quelques secondes, on le nettoie.
       // Ça règle les vieux fantômes créés par un refresh/fermeture d'onglet.
-      if(age > 4500){
+      if(age > 3000){
         staleDuplicateIds.push(p.player_id);
         continue;
       }
@@ -267,7 +272,7 @@
   async function pushDbState(force=false){
     if(!supa || !dbLiveReady) return;
     const now = performance.now();
-    if(!force && now - lastDbPush < 28) return;
+    if(!force && now - lastDbPush < 50) return;
     lastDbPush = now;
 
     const row = {
@@ -299,10 +304,10 @@
   async function pullDbPlayers(force=false){
     if(!supa || !dbLiveReady) return;
     const now = performance.now();
-    if(!force && now - lastDbPull < 35) return;
+    if(!force && now - lastDbPull < 70) return;
     lastDbPull = now;
 
-    const cutoff = new Date(Date.now() - 12000).toISOString();
+    const cutoff = new Date(Date.now() - 7000).toISOString();
 
     const { data, error } = await supa
       .from('frost_tower_players')
@@ -325,7 +330,7 @@
     for(const p of data || []){
       if(p.player_id !== id && normalizePlayerName(p.name) === myName){
         const age = Date.now() - new Date(p.updated_at || 0).getTime();
-        if(age <= 4500){
+        if(age <= 3000){
           await removeOwnDbState();
           stopAndReturnToMenu(`Nom déjà utilisé dans la room "${room}". Tu as été retiré de la partie.`);
           return;
@@ -732,10 +737,10 @@
   });
 
   addEventListener('beforeunload', () => {
-    if(!supa || !dbLiveReady) return;
-    // Nettoyage rapide pour éviter les fantômes dans la room après refresh/fermeture.
-    // Le player_id persistant fait aussi que le refresh reprend la même présence.
-    removeOwnDbState();
+    // Ne pas supprimer la ligne au refresh : le même onglet reprend le même
+    // sessionStorage player_id et upsert par-dessus. Supprimer ici causait des
+    // disparitions/flicker en live chez les autres joueurs. Les vrais fantômes
+    // sont nettoyés par updated_at/cutoff dans pullDbPlayers/ensureNameAvailable.
   });
 
   joinBtn.addEventListener('click', async () => {
