@@ -43,7 +43,12 @@
   addEventListener('resize', resize);
   resize();
 
-  const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random()));
+  const PLAYER_ID_KEY = 'frostTowerStablePlayerId';
+  let id = localStorage.getItem(PLAYER_ID_KEY);
+  if(!id){
+    id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random()));
+    localStorage.setItem(PLAYER_ID_KEY, id);
+  }
   const keys = {};
   let running = false;
   let room = 'friends';
@@ -150,6 +155,84 @@
     }
   }
 
+
+  function normalizePlayerName(name){
+    return String(name || '').trim().toLowerCase();
+  }
+
+  function stopAndReturnToMenu(message){
+    running = false;
+    others.clear();
+    menu.classList.remove('hidden');
+    hud.classList.add('hidden');
+    leaderboard.classList.add('hidden');
+    playersPanel.classList.add('hidden');
+    statusEl.textContent = message || 'Déconnecté de la partie.';
+    updateLeaderboard();
+    updatePlayersList();
+  }
+
+  async function removeOwnDbState(){
+    if(!supa || !dbLiveReady) return;
+    try{
+      await supa
+        .from('frost_tower_players')
+        .delete()
+        .eq('room', room)
+        .eq('player_id', id);
+    }catch(e){
+      console.warn('cleanup player failed', e);
+    }
+  }
+
+  async function ensureNameAvailable(){
+    if(!supa || !dbLiveReady) return true;
+
+    const cleanName = normalizePlayerName(state.name);
+    if(!cleanName) return true;
+
+    const cutoff = new Date(Date.now() - 12000).toISOString();
+    const { data, error } = await supa
+      .from('frost_tower_players')
+      .select('player_id,name,updated_at')
+      .eq('room', room)
+      .eq('name', state.name)
+      .gte('updated_at', cutoff);
+
+    if(error){
+      console.error(error);
+      return true;
+    }
+
+    const now = Date.now();
+    const staleDuplicateIds = [];
+
+    for(const p of data || []){
+      if(p.player_id === id) continue;
+      const age = now - new Date(p.updated_at || 0).getTime();
+
+      // Si le doublon ne bouge plus depuis quelques secondes, on le nettoie.
+      // Ça règle les vieux fantômes créés par un refresh/fermeture d'onglet.
+      if(age > 4500){
+        staleDuplicateIds.push(p.player_id);
+        continue;
+      }
+
+      stopAndReturnToMenu(`Nom déjà utilisé dans la room "${room}". Choisis un autre nom.`);
+      return false;
+    }
+
+    if(staleDuplicateIds.length){
+      await supa
+        .from('frost_tower_players')
+        .delete()
+        .eq('room', room)
+        .in('player_id', staleDuplicateIds);
+    }
+
+    return true;
+  }
+
   async function connectSupabase(){
     try{
       const url = (defaultCfg.SUPABASE_URL || '').trim();
@@ -168,6 +251,9 @@
       supa = window.supabase.createClient(url, anon);
       dbLiveReady = true;
       statusEl.textContent = 'Live fluide connecté : room ' + room;
+
+      const canUseName = await ensureNameAvailable();
+      if(!canUseName) return;
 
       await pushDbState(true);
       await pullDbPlayers(true);
@@ -232,6 +318,20 @@
     }
 
     const presentIds = new Set();
+
+    // Protection anti-duplicate : même nom actif = refusé/kick.
+    // Avec le player_id persistant, un refresh normal reprend la même ligne au lieu d'en créer une deuxième.
+    const myName = normalizePlayerName(state.name);
+    for(const p of data || []){
+      if(p.player_id !== id && normalizePlayerName(p.name) === myName){
+        const age = Date.now() - new Date(p.updated_at || 0).getTime();
+        if(age <= 4500){
+          await removeOwnDbState();
+          stopAndReturnToMenu(`Nom déjà utilisé dans la room "${room}". Tu as été retiré de la partie.`);
+          return;
+        }
+      }
+    }
 
     for(const p of data || []){
       if(p.player_id === id) continue;
@@ -629,6 +729,13 @@
 
   addEventListener('keyup', e => {
     keys[e.code] = false;
+  });
+
+  addEventListener('beforeunload', () => {
+    if(!supa || !dbLiveReady) return;
+    // Nettoyage rapide pour éviter les fantômes dans la room après refresh/fermeture.
+    // Le player_id persistant fait aussi que le refresh reprend la même présence.
+    removeOwnDbState();
   });
 
   joinBtn.addEventListener('click', async () => {
